@@ -48,6 +48,7 @@ type Config interface {
 
 // NewTrigger creates a new trigger.
 func NewTrigger(cfg Config, isActive func() bool) (Trigger, error) {
+	fmt.Println("NEW TRIGGER")
 	switch strings.ToLower(cfg.Trigger()) {
 	case "polling":
 		return &pollTrigger{
@@ -66,6 +67,7 @@ func NewTrigger(cfg Config, isActive func() bool) (Trigger, error) {
 }
 
 func newFSNotifyTrigger(cfg Config, isActive func() bool) Trigger {
+	fmt.Println("notifyTrigger")
 	workspaces := map[string]struct{}{}
 	for _, a := range cfg.Artifacts() {
 		workspaces[a.Workspace] = struct{}{}
@@ -173,9 +175,13 @@ func (t *manualTrigger) Start(ctx context.Context) (<-chan bool, error) {
 // It will attempt to start as a polling trigger if it tried unsuccessfully to start a notify trigger.
 func StartTrigger(ctx context.Context, t Trigger) (<-chan bool, error) {
 	ret, err := t.Start(ctx)
+
+	fmt.Println("START TRIG")
+
 	if err == nil {
 		return ret, err
 	}
+	fmt.Println(err)
 	if fsnotify, ok := t.(*fsNotify.Trigger); ok {
 		logrus.Debugln("Couldn't start notify trigger. Falling back to a polling trigger")
 

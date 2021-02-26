@@ -46,6 +46,7 @@ func (l *SkaffoldListener) LogWatchToUser(out io.Writer) {
 // WatchForChanges listens to a trigger, and when one is received, computes file changes and
 // conditionally runs the dev loop.
 func (l *SkaffoldListener) WatchForChanges(ctx context.Context, out io.Writer, devLoop func() error) error {
+	fmt.Println("WATCH CHANG")
 	ctxTrigger, cancelTrigger := context.WithCancel(ctx)
 	defer cancelTrigger()
 	trigger, err := trigger.StartTrigger(ctxTrigger, l.Trigger)

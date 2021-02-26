@@ -19,11 +19,12 @@ package fsnotify
 import (
 	"context"
 	"io"
-	"path/filepath"
+	"log"
 	"time"
 
+	"github.com/dietsche/rfsnotify"
 	"github.com/rjeczalik/notify"
-	"github.com/sirupsen/logrus"
+	"gopkg.in/fsnotify.v1"
 
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/color"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
@@ -72,7 +73,56 @@ func (t *Trigger) LogWatchToUser(out io.Writer) {
 
 // Start listening for file system changes
 func (t *Trigger) Start(ctx context.Context) (<-chan bool, error) {
-	c := make(chan notify.EventInfo, 100)
+	watcher, err := rfsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer watcher.Close()
+
+	trigger := make(chan bool)
+	c := make(chan bool)
+
+	go func() {
+		timer := time.NewTimer(1<<63 - 1) // Forever
+
+		log.Printf("%v\n", t.Interval)
+
+		for {
+			select {
+			case <-c:
+				log.Println("c triggered")
+				timer.Reset(t.Interval)
+			case event, ok := <-watcher.Events:
+				log.Printf("some event %v %v\n", ok, event)
+				if !ok {
+					continue
+				}
+				log.Println("event:", event)
+				if event.Op&fsnotify.Write == fsnotify.Write {
+					log.Println("modified file:", event.Name)
+
+					// Wait t.Ienterval before triggering.
+					// This way, rapid stream of events will be grouped.
+					timer.Reset(t.Interval)
+				}
+			case err, ok := <-watcher.Errors:
+				log.Println("error:", err)
+				if !ok {
+					return
+				}
+				log.Println("error:", err)
+
+			case <-timer.C:
+				log.Println("timer trigerred")
+				trigger <- true
+
+			case <-ctx.Done():
+				log.Println("DONE")
+				timer.Stop()
+				return
+			}
+		}
+	}()
 
 	// Workaround https://github.com/rjeczalik/notify/issues/96
 	wd, err := util.RealWorkDir()
@@ -81,7 +131,10 @@ func (t *Trigger) Start(ctx context.Context) (<-chan bool, error) {
 	}
 
 	// Watch current directory recursively
-	if err := t.watchFunc(filepath.Join(wd, "..."), c, notify.All); err != nil {
+	err = watcher.AddRecursive(wd)
+	if err != nil {
+		log.Println("HERE")
+		log.Println(err)
 		return nil, err
 	}
 
@@ -91,7 +144,8 @@ func (t *Trigger) Start(ctx context.Context) (<-chan bool, error) {
 			continue
 		}
 
-		if err := t.watchFunc(filepath.Join(wd, w, "..."), c, notify.All); err != nil {
+		if err := watcher.AddRecursive(w); err != nil {
+			log.Println("X")
 			return nil, err
 		}
 	}
@@ -99,33 +153,7 @@ func (t *Trigger) Start(ctx context.Context) (<-chan bool, error) {
 	// Since the file watcher runs in a separate go routine
 	// and can take some time to start, it can lose the very first change.
 	// As a mitigation, we act as if a change was detected.
-	go func() { c <- nil }()
-
-	trigger := make(chan bool)
-	go func() {
-		timer := time.NewTimer(1<<63 - 1) // Forever
-
-		for {
-			select {
-			case e := <-c:
-
-				// Ignore detected changes if not active or to be ignore.
-				if !t.isActive() && t.Ignore(e) {
-					continue
-				}
-				logrus.Debugln("Change detected", e)
-
-				// Wait t.Ienterval before triggering.
-				// This way, rapid stream of events will be grouped.
-				timer.Reset(t.Interval)
-			case <-timer.C:
-				trigger <- true
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			}
-		}
-	}()
+	go func() { c <- true }()
 
 	return trigger, nil
 }

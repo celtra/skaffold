@@ -23,12 +23,14 @@ require (
 	github.com/buildpacks/lifecycle v0.10.2
 	github.com/buildpacks/pack v0.17.0
 	github.com/cenkalti/backoff/v4 v4.0.2
+	github.com/dietsche/rfsnotify v0.0.0-20200716145600-b37be6e4177f // indirect
 	github.com/docker/cli v20.10.0-beta1.0.20201117192004-5cc239616494+incompatible
 	github.com/docker/distribution v2.7.1+incompatible
 	github.com/docker/docker v20.10.0-beta1.0.20201110211921-af34b94a78a1+incompatible
 	github.com/docker/go-connections v0.4.0
 	github.com/docker/go-metrics v0.0.1 // indirect
 	github.com/dustin/go-humanize v1.0.0
+	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/ghodss/yaml v1.0.0
 	github.com/go-git/go-git/v5 v5.0.0
 	github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
@@ -75,6 +77,7 @@ require (
 	google.golang.org/genproto v0.0.0-20201202151023-55d61f90c1ce
 	google.golang.org/grpc v1.33.2
 	google.golang.org/protobuf v1.25.0
+	gopkg.in/fsnotify.v1 v1.4.7 // indirect
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.0-20200615113413-eeeca48fe776
 	k8s.io/api v0.19.7

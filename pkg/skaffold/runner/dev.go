@@ -25,7 +25,6 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/color"
 	sErrors "github.com/GoogleContainerTools/skaffold/pkg/skaffold/errors"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/event"
@@ -149,7 +148,7 @@ func (r *SkaffoldRunner) doDev(ctx context.Context, out io.Writer, logger *kuber
 func (r *SkaffoldRunner) Dev(ctx context.Context, out io.Writer, artifacts []*latest.Artifact) error {
 	event.DevLoopInProgress(r.devIteration)
 	defer func() { r.devIteration++ }()
-	g := getTransposeGraph(artifacts)
+	//g := getTransposeGraph(artifacts)
 	// Watch artifacts
 	start := time.Now()
 	color.Default.Fprintln(out, "Listing files to watch...")
@@ -166,25 +165,7 @@ func (r *SkaffoldRunner) Dev(ctx context.Context, out io.Writer, artifacts []*la
 		case <-ctx.Done():
 			return context.Canceled
 		default:
-			if err := r.monitor.Register(
-				func() ([]string, error) {
-					return build.DependenciesForArtifact(ctx, artifact, r.runCtx, r.artifactStore)
-				},
-				func(e filemon.Events) {
-					s, err := sync.NewItem(ctx, artifact, e, r.builds, r.runCtx, len(g[artifact.ImageName]))
-					switch {
-					case err != nil:
-						logrus.Warnf("error adding dirty artifact to changeset: %s", err.Error())
-					case s != nil:
-						r.changeSet.AddResync(s)
-					default:
-						addRebuild(g, artifact, r.changeSet.AddRebuild, r.runCtx.Opts.IsTargetImage)
-					}
-				},
-			); err != nil {
-				event.DevLoopFailedWithErrorCode(r.devIteration, proto.StatusCode_DEVINIT_REGISTER_BUILD_DEPS, err)
-				return fmt.Errorf("watching files for artifact %q: %w", artifact.ImageName, err)
-			}
+			break
 		}
 	}
 
