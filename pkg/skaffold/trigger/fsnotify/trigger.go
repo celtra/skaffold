@@ -91,7 +91,7 @@ func (t *Trigger) Start(ctx context.Context) (<-chan bool, error) {
 			continue
 		}
 
-		if err := t.watchFunc(filepath.Join(wd, w, "..."), c, notify.All); err != nil {
+		if err := t.watchFunc(filepath.Join(w, "..."), c, notify.All); err != nil {
 			return nil, err
 		}
 	}
