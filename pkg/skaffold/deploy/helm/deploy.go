@@ -226,9 +226,6 @@ func (h *Deployer) Dependencies() ([]string, error) {
 
 // Cleanup deletes what was deployed by calling Deploy.
 func (h *Deployer) Cleanup(ctx context.Context, out io.Writer) error {
-	argsChan := make(chan []string)
-	errChan := make(chan error)
-
 	for _, r := range h.Releases {
 		releaseName, err := util.ExpandEnvTemplateOrFail(r.Name, nil)
 		if err != nil {
@@ -244,25 +241,11 @@ func (h *Deployer) Cleanup(ctx context.Context, out io.Writer) error {
 		if namespace != "" {
 			args = append(args, "--namespace", namespace)
 		}
-		go wrapExec(ctx, out, h, argsChan, errChan)
-		argsChan <- args
-	}
-	// check channel for errors
-	for err := range errChan {
-		if err != nil {
+		if err := h.exec(ctx, out, false, nil, args...); err != nil {
 			return deployerr.CleanupErr(err)
 		}
 	}
 	return nil
-}
-
-func wrapExec(
-	ctx context.Context,
-	out io.Writer,
-	h *Deployer,
-	args <-chan []string,
-	err chan<- error) {
-	err <- h.exec(ctx, out, false, nil, (<-args)...)
 }
 
 // Render generates the Kubernetes manifests and writes them out
