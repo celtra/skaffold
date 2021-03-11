@@ -32,11 +32,22 @@ import (
 // it collects the results and returns it in bulk.
 type DeployerMux []Deployer
 
+// Channel-friendly structure for Deploy's return signature
+type ret struct {
+	ns []string
+	e  error
+}
+
 func (m DeployerMux) Deploy(ctx context.Context, w io.Writer, as []build.Artifact) ([]string, error) {
+	retChan := make(chan ret)
 	seenNamespaces := util.NewStringSet()
 
 	for _, deployer := range m {
-		namespaces, err := deployer.Deploy(ctx, w, as)
+		go wrapDeploy(ctx, w, as, deployer, retChan)
+	}
+	for range m {
+		ret := <-retChan
+		namespaces, err := ret.ns, ret.e
 		if err != nil {
 			return nil, err
 		}
@@ -59,8 +70,13 @@ func (m DeployerMux) Dependencies() ([]string, error) {
 }
 
 func (m DeployerMux) Cleanup(ctx context.Context, w io.Writer) error {
+	errChan := make(chan error)
+
 	for _, deployer := range m {
-		if err := deployer.Cleanup(ctx, w); err != nil {
+		go wrapCleanup(ctx, w, deployer, errChan)
+	}
+	for range m {
+		if err := <-errChan; err != nil {
 			return err
 		}
 	}
@@ -79,4 +95,22 @@ func (m DeployerMux) Render(ctx context.Context, w io.Writer, as []build.Artifac
 
 	allResources := strings.Join(resources, "\n---\n")
 	return manifest.Write(allResources, filepath, w)
+}
+
+func wrapDeploy(
+	ctx context.Context,
+	w io.Writer,
+	as []build.Artifact,
+	d Deployer,
+	q chan<- ret) {
+	ns, e := d.Deploy(ctx, w, as)
+	q <- ret{ns, e}
+}
+
+func wrapCleanup(
+	ctx context.Context,
+	w io.Writer,
+	d Deployer,
+	err chan<- error) {
+	err <- d.Cleanup(ctx, w)
 }
