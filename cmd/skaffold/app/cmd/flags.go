@@ -35,6 +35,7 @@ var (
 
 // Flag defines a Skaffold CLI flag which contains a list of
 // subcommands the flag belongs to in `DefinedOn` field.
+// See https://pkg.go.dev/github.com/spf13/pflag#Flag
 type Flag struct {
 	Name               string
 	Shorthand          string
@@ -42,12 +43,11 @@ type Flag struct {
 	Value              interface{}
 	DefValue           interface{}
 	DefValuePerCommand map[string]interface{}
+	NoOptDefVal        string
 	FlagAddMethod      string
 	DefinedOn          []string
 	Hidden             bool
 	IsEnum             bool
-
-	pflag *pflag.Flag
 }
 
 // flagRegistry is a list of all Skaffold CLI flags.
@@ -83,7 +83,7 @@ var flagRegistry = []Flag{
 		Value:         &opts.Profiles,
 		DefValue:      []string{},
 		FlagAddMethod: "StringSliceVar",
-		DefinedOn:     []string{"dev", "run", "debug", "deploy", "render", "build", "delete", "diagnose"},
+		DefinedOn:     []string{"dev", "run", "debug", "deploy", "render", "build", "delete", "diagnose", "apply"},
 	},
 	{
 		Name:          "namespace",
@@ -92,7 +92,7 @@ var flagRegistry = []Flag{
 		Value:         &opts.Namespace,
 		DefValue:      "",
 		FlagAddMethod: "StringVar",
-		DefinedOn:     []string{"dev", "run", "debug", "deploy", "render", "build", "delete"},
+		DefinedOn:     []string{"dev", "run", "debug", "deploy", "render", "build", "delete", "apply"},
 	},
 	{
 		Name:          "default-repo",
@@ -138,11 +138,12 @@ var flagRegistry = []Flag{
 	},
 	{
 		Name:     "enable-rpc",
-		Usage:    "Enable gRPC for exposing Skaffold events (true by default for `skaffold dev`)",
+		Usage:    "Enable gRPC for exposing Skaffold events",
 		Value:    &opts.EnableRPC,
 		DefValue: false,
 		DefValuePerCommand: map[string]interface{}{
-			"dev": true,
+			"dev":   true,
+			"debug": true,
 		},
 		FlagAddMethod: "BoolVar",
 		DefinedOn:     []string{"dev", "build", "run", "debug", "deploy"},
@@ -192,7 +193,7 @@ var flagRegistry = []Flag{
 	},
 	{
 		Name:     "tail",
-		Usage:    "Stream logs from deployed objects (true by default for `skaffold dev` and `skaffold debug`)",
+		Usage:    "Stream logs from deployed objects",
 		Value:    &opts.Tail,
 		DefValue: false,
 		DefValuePerCommand: map[string]interface{}{
@@ -200,7 +201,7 @@ var flagRegistry = []Flag{
 			"debug": true,
 		},
 		FlagAddMethod: "BoolVar",
-		DefinedOn:     []string{"dev", "run", "debug", "deploy"},
+		DefinedOn:     []string{"dev", "run", "debug", "deploy", "apply"},
 		IsEnum:        true,
 	},
 	{
@@ -209,7 +210,7 @@ var flagRegistry = []Flag{
 		Value:         &opts.Force,
 		DefValue:      false,
 		FlagAddMethod: "BoolVar",
-		DefinedOn:     []string{"deploy", "dev", "run", "debug"},
+		DefinedOn:     []string{"deploy", "dev", "run", "debug", "apply"},
 		IsEnum:        true,
 	},
 	{
@@ -263,7 +264,7 @@ var flagRegistry = []Flag{
 		Value:         &opts.StatusCheck,
 		DefValue:      true,
 		FlagAddMethod: "BoolVar",
-		DefinedOn:     []string{"dev", "debug", "deploy", "run"},
+		DefinedOn:     []string{"dev", "debug", "deploy", "run", "apply"},
 		IsEnum:        true,
 	},
 	{
@@ -290,7 +291,7 @@ var flagRegistry = []Flag{
 		Value:         &opts.GlobalConfig,
 		DefValue:      "",
 		FlagAddMethod: "StringVar",
-		DefinedOn:     []string{"run", "dev", "debug", "build", "deploy", "delete", "diagnose"},
+		DefinedOn:     []string{"run", "dev", "debug", "build", "deploy", "delete", "diagnose", "apply"},
 	},
 	{
 		Name:          "kube-context",
@@ -298,7 +299,7 @@ var flagRegistry = []Flag{
 		Value:         &opts.KubeContext,
 		DefValue:      "",
 		FlagAddMethod: "StringVar",
-		DefinedOn:     []string{"build", "debug", "delete", "deploy", "dev", "run", "filter"},
+		DefinedOn:     []string{"build", "debug", "delete", "deploy", "dev", "run", "filter", "apply"},
 	},
 	{
 		Name:          "kubeconfig",
@@ -306,7 +307,7 @@ var flagRegistry = []Flag{
 		Value:         &opts.KubeConfig,
 		DefValue:      "",
 		FlagAddMethod: "StringVar",
-		DefinedOn:     []string{"build", "debug", "delete", "deploy", "dev", "run", "filter"},
+		DefinedOn:     []string{"build", "debug", "delete", "deploy", "dev", "run", "filter", "apply"},
 	},
 	{
 		Name:          "tag",
@@ -511,18 +512,18 @@ func methodNameByType(v reflect.Value) string {
 	return ""
 }
 
-func (fl *Flag) flag() *pflag.Flag {
-	if fl.pflag != nil {
-		return fl.pflag
-	}
-
+func (fl *Flag) flag(cmdName string) *pflag.Flag {
 	methodName := fl.FlagAddMethod
 	if methodName == "" {
 		methodName = methodNameByType(reflect.ValueOf(fl.Value))
 	}
 	inputs := []interface{}{fl.Value, fl.Name}
 	if methodName != "Var" {
-		inputs = append(inputs, fl.DefValue)
+		if d, found := fl.DefValuePerCommand[cmdName]; found {
+			inputs = append(inputs, d)
+		} else {
+			inputs = append(inputs, fl.DefValue)
+		}
 	}
 	inputs = append(inputs, fl.Usage)
 
@@ -530,10 +531,12 @@ func (fl *Flag) flag() *pflag.Flag {
 
 	reflect.ValueOf(fs).MethodByName(methodName).Call(reflectValueOf(inputs))
 	f := fs.Lookup(fl.Name)
+	if len(fl.NoOptDefVal) > 0 {
+		// f.NoOptDefVal may be set depending on value type
+		f.NoOptDefVal = fl.NoOptDefVal
+	}
 	f.Shorthand = fl.Shorthand
 	f.Hidden = fl.Hidden
-
-	fl.pflag = f
 	return f
 }
 
@@ -545,15 +548,21 @@ func reflectValueOf(values []interface{}) []reflect.Value {
 	return results
 }
 
-func ParseFlags(cmd *cobra.Command, flags []*Flag) {
+func ResetFlagDefaults(cmd *cobra.Command, flags []*Flag) {
 	// Update default values.
 	for _, fl := range flags {
 		flag := cmd.Flag(fl.Name)
-		if fl.DefValuePerCommand != nil {
-			if defValue, present := fl.DefValuePerCommand[cmd.Use]; present {
-				if !flag.Changed {
-					flag.Value.Set(fmt.Sprintf("%v", defValue))
+		if !flag.Changed {
+			defValue := fl.DefValue
+			if fl.DefValuePerCommand != nil {
+				if d, present := fl.DefValuePerCommand[cmd.Use]; present {
+					defValue = d
 				}
+			}
+			if sv, ok := flag.Value.(pflag.SliceValue); ok {
+				reflect.ValueOf(sv).MethodByName("Replace").Call(reflectValueOf([]interface{}{defValue}))
+			} else {
+				flag.Value.Set(fmt.Sprintf("%v", defValue))
 			}
 		}
 		if fl.IsEnum {
@@ -572,14 +581,14 @@ func AddFlags(cmd *cobra.Command) {
 			continue
 		}
 
-		cmd.Flags().AddFlag(fl.flag())
+		cmd.Flags().AddFlag(fl.flag(cmd.Use))
 
 		flagsForCommand = append(flagsForCommand, fl)
 	}
 
 	// Apply command-specific default values to flags.
 	cmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		ParseFlags(cmd, flagsForCommand)
+		ResetFlagDefaults(cmd, flagsForCommand)
 		// Since PersistentPreRunE replaces the parent's PersistentPreRunE,
 		// make sure we call it, if it is set.
 		if parent := cmd.Parent(); parent != nil {

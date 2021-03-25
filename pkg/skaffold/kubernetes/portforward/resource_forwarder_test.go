@@ -34,12 +34,12 @@ import (
 
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/constants"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/label"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/event"
 	kubernetesclient "github.com/GoogleContainerTools/skaffold/pkg/skaffold/kubernetes/client"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
 	schemautil "github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/util"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 	"github.com/GoogleContainerTools/skaffold/testutil"
+	testEvent "github.com/GoogleContainerTools/skaffold/testutil/event"
 )
 
 type testForwarder struct {
@@ -121,7 +121,7 @@ func TestStart(t *testing.T) {
 	}
 	for _, test := range tests {
 		testutil.Run(t, test.description, func(t *testutil.T) {
-			event.InitializeState([]latest.Pipeline{{}}, "", true, true, true)
+			testEvent.InitializeState([]latest.Pipeline{{}})
 			t.Override(&retrieveAvailablePort, mockRetrieveAvailablePort("127.0.0.1", map[int]struct{}{}, test.availablePorts))
 			t.Override(&retrieveServices, func(context.Context, string, []string) ([]*latest.PortForwardResource, error) {
 				return test.resources, nil
@@ -130,8 +130,8 @@ func TestStart(t *testing.T) {
 			fakeForwarder := newTestForwarder()
 			entryManager := NewEntryManager(ioutil.Discard, fakeForwarder)
 
-			rf := NewResourceForwarder(entryManager, []string{"test"}, "", nil)
-			if err := rf.Start(context.Background()); err != nil {
+			rf := NewResourceForwarder(entryManager, "", nil)
+			if err := rf.Start(context.Background(), []string{"test"}); err != nil {
 				t.Fatalf("error starting resource forwarder: %v", err)
 			}
 
@@ -194,7 +194,7 @@ func TestGetCurrentEntryFunc(t *testing.T) {
 			entryManager.forwardedResources = forwardedResources{
 				resources: test.forwardedResources,
 			}
-			rf := NewResourceForwarder(entryManager, []string{"test"}, "", nil)
+			rf := NewResourceForwarder(entryManager, "", nil)
 			actualEntry := rf.getCurrentEntry(test.resource)
 
 			expectedEntry := test.expected
@@ -263,7 +263,7 @@ func TestUserDefinedResources(t *testing.T) {
 
 	for _, test := range tests {
 		testutil.Run(t, test.description, func(t *testutil.T) {
-			event.InitializeState([]latest.Pipeline{{}}, "", true, true, true)
+			testEvent.InitializeState([]latest.Pipeline{{}})
 			t.Override(&retrieveAvailablePort, mockRetrieveAvailablePort("127.0.0.1", map[int]struct{}{}, []int{8080, 9000}))
 			t.Override(&retrieveServices, func(context.Context, string, []string) ([]*latest.PortForwardResource, error) {
 				return []*latest.PortForwardResource{svc}, nil
@@ -272,8 +272,8 @@ func TestUserDefinedResources(t *testing.T) {
 			fakeForwarder := newTestForwarder()
 			entryManager := NewEntryManager(ioutil.Discard, fakeForwarder)
 
-			rf := NewResourceForwarder(entryManager, test.namespaces, "", test.userResources)
-			if err := rf.Start(context.Background()); err != nil {
+			rf := NewResourceForwarder(entryManager, "", test.userResources)
+			if err := rf.Start(context.Background(), test.namespaces); err != nil {
 				t.Fatalf("error starting resource forwarder: %v", err)
 			}
 

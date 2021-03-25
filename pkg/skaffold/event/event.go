@@ -30,7 +30,6 @@ import (
 
 	sErrors "github.com/GoogleContainerTools/skaffold/pkg/skaffold/errors"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/instrumentation"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/util"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/version"
 	"github.com/GoogleContainerTools/skaffold/proto/v1"
@@ -157,15 +156,15 @@ func (ev *eventHandler) forEachEvent(callback func(*proto.LogEntry) error) error
 	return <-listener.errors
 }
 
-func emptyState(pipelines []latest.Pipeline, kubeContext string, autoBuild, autoDeploy, autoSync bool) proto.State {
+func emptyState(cfg Config) proto.State {
 	builds := map[string]string{}
-	for _, p := range pipelines {
+	for _, p := range cfg.GetPipelines() {
 		for _, a := range p.Build.Artifacts {
 			builds[a.ImageName] = NotStarted
 		}
 	}
-	metadata := initializeMetadata(pipelines, kubeContext)
-	return emptyStateWithArtifacts(builds, metadata, autoBuild, autoDeploy, autoSync)
+	metadata := initializeMetadata(cfg.GetPipelines(), cfg.GetKubeContext())
+	return emptyStateWithArtifacts(builds, metadata, cfg.AutoBuild(), cfg.AutoDeploy(), cfg.AutoSync())
 }
 
 func emptyStateWithArtifacts(builds map[string]string, metadata *proto.Metadata, autoBuild, autoDeploy, autoSync bool) proto.State {
@@ -174,6 +173,10 @@ func emptyStateWithArtifacts(builds map[string]string, metadata *proto.Metadata,
 			Artifacts:   builds,
 			AutoTrigger: autoBuild,
 			StatusCode:  proto.StatusCode_OK,
+		},
+		TestState: &proto.TestState{
+			Status:     NotStarted,
+			StatusCode: proto.StatusCode_OK,
 		},
 		DeployState: &proto.DeployState{
 			Status:      NotStarted,
@@ -191,8 +194,8 @@ func emptyStateWithArtifacts(builds map[string]string, metadata *proto.Metadata,
 }
 
 // InitializeState instantiates the global state of the skaffold runner, as well as the event log.
-func InitializeState(c []latest.Pipeline, kc string, autoBuild, autoDeploy, autoSync bool) {
-	handler.setState(emptyState(c, kc, autoBuild, autoDeploy, autoSync))
+func InitializeState(cfg Config) {
+	handler.setState(emptyState(cfg))
 }
 
 // DeployInProgress notifies that a deployment has been started.
@@ -333,6 +336,31 @@ func BuildComplete(imageName string) {
 	handler.handleBuildEvent(&proto.BuildEvent{Artifact: imageName, Status: Complete})
 }
 
+// TestInProgress notifies that a test has been started.
+func TestInProgress() {
+	handler.handleTestEvent(&proto.TestEvent{Status: InProgress})
+}
+
+// TestCanceled notifies that a test has been canceled.
+func TestCanceled() {
+	handler.handleTestEvent(&proto.TestEvent{Status: Canceled})
+}
+
+// TestFailed notifies that a test has failed.
+func TestFailed(imageName string, err error) {
+	aiErr := sErrors.ActionableErr(sErrors.Test, err)
+	handler.stateLock.Lock()
+	handler.state.TestState.StatusCode = aiErr.ErrCode
+	handler.stateLock.Unlock()
+	handler.handleTestEvent(&proto.TestEvent{Status: Failed,
+		ActionableErr: aiErr})
+}
+
+// TestComplete notifies that a test has completed.
+func TestComplete() {
+	handler.handleTestEvent(&proto.TestEvent{Status: Complete})
+}
+
 // DevLoopInProgress notifies that a dev loop has been started.
 func DevLoopInProgress(i int) {
 	handler.handleDevLoopEvent(&proto.DevLoopEvent{Iteration: int32(i), Status: InProgress})
@@ -365,6 +393,8 @@ func DevLoopFailedInPhase(iteration int, phase sErrors.Phase, err error) {
 		DevLoopFailedWithErrorCode(iteration, state.StatusCheckState.StatusCode, err)
 	case sErrors.Build:
 		DevLoopFailedWithErrorCode(iteration, state.BuildState.StatusCode, err)
+	case sErrors.Test:
+		DevLoopFailedWithErrorCode(iteration, state.TestState.StatusCode, err)
 	default:
 		ai := sErrors.ActionableErr(phase, err)
 		DevLoopFailedWithErrorCode(iteration, ai.ErrCode, err)
@@ -494,6 +524,14 @@ func (ev *eventHandler) handleBuildEvent(e *proto.BuildEvent) {
 	})
 }
 
+func (ev *eventHandler) handleTestEvent(e *proto.TestEvent) {
+	ev.handle(&proto.Event{
+		EventType: &proto.Event_TestEvent{
+			TestEvent: e,
+		},
+	})
+}
+
 func (ev *eventHandler) handleDevLoopEvent(e *proto.DevLoopEvent) {
 	ev.handle(&proto.Event{
 		EventType: &proto.Event_DevLoopEvent{
@@ -559,6 +597,21 @@ func (ev *eventHandler) handleExec(f firedEvent) {
 		case Failed:
 			logEntry.Entry = fmt.Sprintf("Build failed for artifact %s", be.Artifact)
 			// logEntry.Err = be.Err
+		default:
+		}
+	case *proto.Event_TestEvent:
+		te := e.TestEvent
+		ev.stateLock.Lock()
+		ev.state.TestState.Status = te.Status
+		ev.stateLock.Unlock()
+		switch te.Status {
+		case InProgress:
+			logEntry.Entry = "Test started"
+		case Complete:
+			logEntry.Entry = "Test completed"
+		case Failed:
+			logEntry.Entry = "Test failed"
+			// logEntry.Err = te.Err
 		default:
 		}
 	case *proto.Event_DeployEvent:
@@ -666,7 +719,7 @@ func (ev *eventHandler) handleExec(f firedEvent) {
 	ev.logEvent(*logEntry)
 }
 
-// ResetStateOnBuild resets the build, deploy and sync state
+// ResetStateOnBuild resets the build, test, deploy and sync state
 func ResetStateOnBuild() {
 	builds := map[string]string{}
 	for k := range handler.getState().BuildState.Artifacts {
@@ -674,6 +727,13 @@ func ResetStateOnBuild() {
 	}
 	autoBuild, autoDeploy, autoSync := handler.getState().BuildState.AutoTrigger, handler.getState().DeployState.AutoTrigger, handler.getState().FileSyncState.AutoTrigger
 	newState := emptyStateWithArtifacts(builds, handler.getState().Metadata, autoBuild, autoDeploy, autoSync)
+	handler.setState(newState)
+}
+
+// ResetStateOnTest resets the test, deploy, sync and status check state
+func ResetStateOnTest() {
+	newState := handler.getState()
+	newState.TestState.Status = NotStarted
 	handler.setState(newState)
 }
 

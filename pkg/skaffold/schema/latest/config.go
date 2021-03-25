@@ -25,7 +25,7 @@ import (
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/util"
 )
 
-// This config version is not yet released, it is SAFE TO MODIFY the structs in this file.
+// !!! WARNING !!! This config version is already released, please DO NOT MODIFY the structs in this file.
 const Version string = "skaffold/v2beta13"
 
 // NewSkaffoldConfig creates a SkaffoldConfig
@@ -468,11 +468,14 @@ type ResourceRequirement struct {
 	ResourceStorage string `yaml:"resourceStorage,omitempty"`
 }
 
-// TestCase is a list of structure tests to run on images that Skaffold builds.
+// TestCase is a list of tests to run on images that Skaffold builds.
 type TestCase struct {
 	// ImageName is the artifact on which to run those tests.
 	// For example: `gcr.io/k8s-skaffold/example`.
 	ImageName string `yaml:"image" yamltags:"required"`
+
+	// CustomTests lists the set of custom tests to run after an artifact is built.
+	CustomTests []CustomTest `yaml:"custom,omitempty"`
 
 	// StructureTests lists the [Container Structure Tests](https://github.com/GoogleContainerTools/container-structure-test)
 	// to run on that artifact.
@@ -675,8 +678,11 @@ type HelmRelease struct {
 	// It accepts environment variables via the go template syntax.
 	Name string `yaml:"name,omitempty" yamltags:"required"`
 
-	// ChartPath is the path to the Helm chart.
-	ChartPath string `yaml:"chartPath,omitempty" yamltags:"required" skaffold:"filepath"`
+	// ChartPath is the local path to a packaged Helm chart or an unpacked Helm chart directory.
+	ChartPath string `yaml:"chartPath,omitempty" yamltags:"oneOf=chartSource" skaffold:"filepath"`
+
+	// RemoteChart refers to a remote Helm chart reference or URL.
+	RemoteChart string `yaml:"remoteChart,omitempty" yamltags:"oneOf=chartSource"`
 
 	// ValuesFiles are the paths to the Helm `values` files.
 	ValuesFiles []string `yaml:"valuesFiles,omitempty" skaffold:"filepath"`
@@ -705,7 +711,7 @@ type HelmRelease struct {
 
 	// SetFiles are key-value pairs.
 	// If present, Skaffold will send `--set-file` flag to Helm CLI and append all pairs after the flag.
-	SetFiles map[string]string `yaml:"setFiles,omitempty"`
+	SetFiles map[string]string `yaml:"setFiles,omitempty" skaffold:"filepath"`
 
 	// CreateNamespace if `true`, Skaffold will send `--create-namespace` flag to Helm CLI.
 	// `--create-namespace` flag is available in Helm since version 3.2.
@@ -728,8 +734,9 @@ type HelmRelease struct {
 	// UseHelmSecrets instructs skaffold to use secrets plugin on deployment.
 	UseHelmSecrets bool `yaml:"useHelmSecrets,omitempty"`
 
-	// Remote specifies whether the chart path is remote, or exists on the host filesystem.
-	Remote bool `yaml:"remote,omitempty"`
+	// Repo specifies the helm repository for remote charts.
+	// If present, Skaffold will send `--repo` Helm CLI flag or flags.
+	Repo string `yaml:"repo,omitempty"`
 
 	// UpgradeOnChange specifies whether to upgrade helm chart on code changes.
 	// Default is `true` when helm chart is local (`remote: false`).
@@ -1010,6 +1017,36 @@ type CustomDependencies struct {
 	// Ignore specifies the paths that should be ignored by skaffold's file watcher. If a file exists in both `paths` and in `ignore`, it will be ignored, and will be excluded from both rebuilds and file synchronization.
 	// Will only work in conjunction with `paths`.
 	Ignore []string `yaml:"ignore,omitempty"`
+}
+
+// CustomTest describes the custom test command provided by the user.
+// Custom tests are run after an image build whenever build or test dependencies are changed.
+type CustomTest struct {
+	// Command is the custom command to be executed.  If the command exits with a non-zero return
+	// code, the test will be considered to have failed.
+	Command string `yaml:"command" yamltags:"required"`
+
+	// TimeoutSeconds sets the wait time for skaffold for the command to complete.
+	// If unset or 0, Skaffold will wait until the command completes.
+	TimeoutSeconds int `yaml:"timeoutSeconds,omitempty"`
+
+	// Dependencies are additional test-specific file dependencies; changes to these files will re-run this test.
+	Dependencies *CustomTestDependencies `yaml:"dependencies,omitempty"`
+}
+
+// CustomTestDependencies is used to specify dependencies for custom test command.
+// `paths` should be specified for file watching to work as expected.
+type CustomTestDependencies struct {
+	// Command represents a command that skaffold executes to obtain dependencies. The output of this command *must* be a valid JSON array.
+	Command string `yaml:"command,omitempty" yamltags:"oneOf=dependency"`
+
+	// Paths should be set to the file dependencies for this command, so that the skaffold file watcher knows when to retest and perform file synchronization.
+	// For example: `["src/test/**"]`
+	Paths []string `yaml:"paths,omitempty" yamltags:"oneOf=dependency" skaffold:"filepath"`
+
+	// Ignore specifies the paths that should be ignored by skaffold's file watcher. If a file exists in both `paths` and in `ignore`, it will be ignored, and will be excluded from both retest and file synchronization.
+	// Will only work in conjunction with `paths`.
+	Ignore []string `yaml:"ignore,omitempty" skaffold:"filepath"`
 }
 
 // DockerfileDependency *beta* is used to specify a custom build artifact that is built from a Dockerfile. This allows skaffold to determine dependencies from the Dockerfile.

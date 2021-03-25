@@ -25,7 +25,6 @@ import (
 	"k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build/tag"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/config"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/helm"
@@ -36,6 +35,7 @@ import (
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/defaults"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/sync"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/tag"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/test"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 	"github.com/GoogleContainerTools/skaffold/testutil"
@@ -203,7 +203,16 @@ func (r *SkaffoldRunner) WithMonitor(m filemon.Monitor) *SkaffoldRunner {
 	return r
 }
 
-func createRunner(t *testutil.T, testBench *TestBench, monitor filemon.Monitor, artifacts []*latest.Artifact) *SkaffoldRunner {
+type triggerState struct {
+	build  bool
+	sync   bool
+	deploy bool
+}
+
+func createRunner(t *testutil.T, testBench *TestBench, monitor filemon.Monitor, artifacts []*latest.Artifact, autoTriggers *triggerState) *SkaffoldRunner {
+	if autoTriggers == nil {
+		autoTriggers = &triggerState{true, true, true}
+	}
 	cfg := &latest.SkaffoldConfig{
 		Pipeline: latest.Pipeline{
 			Build: latest.BuildConfig{
@@ -223,9 +232,9 @@ func createRunner(t *testutil.T, testBench *TestBench, monitor filemon.Monitor, 
 		Opts: config.SkaffoldOptions{
 			Trigger:           "polling",
 			WatchPollInterval: 100,
-			AutoBuild:         true,
-			AutoSync:          true,
-			AutoDeploy:        true,
+			AutoBuild:         autoTriggers.build,
+			AutoSync:          autoTriggers.sync,
+			AutoDeploy:        autoTriggers.deploy,
 		},
 	}
 	runner, err := NewForConfig(runCtx)

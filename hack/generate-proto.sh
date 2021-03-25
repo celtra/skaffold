@@ -17,9 +17,18 @@
 set -e
 
 docker build -t gen-proto -f hack/proto/Dockerfile --target generate-files proto
-docker run --rm gen-proto cat skaffold.pb.go > proto/v1/skaffold.pb.go
-docker run --rm gen-proto cat skaffold.pb.gw.go > proto/v1/skaffold.pb.gw.go
-docker run --rm gen-proto cat index.md > docs/content/en/docs/references/api/grpc.md
-docker run --rm gen-proto cat skaffold.swagger.json > docs/content/en/api/skaffold.swagger.json
+docker run --rm gen-proto cat enums/github.com/GoogleContainerTools/skaffold/proto/enums/enums.pb.go > proto/enums/enums.pb.go
+
+# Copy v1 files
+docker run --rm gen-proto cat v1/skaffold.pb.go > proto/v1/skaffold.pb.go
+docker run --rm gen-proto cat v1/skaffold.pb.gw.go > proto/v1/skaffold.pb.gw.go
+
+# Copy v2 files
+docker run --rm gen-proto cat /proto/github.com/GoogleContainerTools/skaffold/proto/v2/skaffold.pb.go > proto/v2/skaffold.pb.go
+docker run --rm gen-proto cat /proto/github.com/GoogleContainerTools/skaffold/proto/v2/skaffold.pb.gw.go > proto/v2/skaffold.pb.gw.go
+
+# Get docs from docker image
+docker run --rm gen-proto cat v1/index.md > docs/content/en/docs/references/api/grpc.md
+docker run --rm gen-proto cat v1/skaffold.swagger.json > docs/content/en/api/skaffold.swagger.json
 
 printf "\nFinished generating proto files, please commit the results.\n"

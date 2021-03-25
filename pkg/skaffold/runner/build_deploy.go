@@ -26,10 +26,10 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build"
-	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/build/tag"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/color"
 	deployutil "github.com/GoogleContainerTools/skaffold/pkg/skaffold/deploy/util"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/tag"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 )
 
@@ -49,8 +49,9 @@ func (r *SkaffoldRunner) Build(ctx context.Context, out io.Writer, artifacts []*
 		return nil, err
 	}
 
-	// In dry-run mode or with --digest-source  set to 'remote', we don't build anything, just return the tag for each artifact.
-	if r.runCtx.DryRun() || (r.runCtx.DigestSource() == remoteDigestSource) {
+	// In dry-run mode or with --digest-source  set to 'remote' or 'tag', we don't build anything, just return the tag for each artifact.
+	if r.runCtx.DryRun() || (r.runCtx.DigestSource() == remoteDigestSource) ||
+		(r.runCtx.DigestSource() == tagDigestSource) {
 		var bRes []build.Artifact
 		for _, artifact := range artifacts {
 			bRes = append(bRes, build.Artifact{
@@ -108,7 +109,6 @@ func (r *SkaffoldRunner) DeployAndLog(ctx context.Context, out io.Writer, artifa
 
 	// Logs should be retrieved up to just before the deploy
 	logger.SetSince(time.Now())
-
 	// First deploy
 	if err := r.Deploy(ctx, out, artifacts); err != nil {
 		return err
@@ -117,12 +117,12 @@ func (r *SkaffoldRunner) DeployAndLog(ctx context.Context, out io.Writer, artifa
 	forwarderManager := r.createForwarder(out)
 	defer forwarderManager.Stop()
 
-	if err := forwarderManager.Start(ctx); err != nil {
+	if err := forwarderManager.Start(ctx, r.runCtx.GetNamespaces()); err != nil {
 		logrus.Warnln("Error starting port forwarding:", err)
 	}
 
 	// Start printing the logs after deploy is finished
-	if err := logger.Start(ctx); err != nil {
+	if err := logger.Start(ctx, r.runCtx.GetNamespaces()); err != nil {
 		return fmt.Errorf("starting logger: %w", err)
 	}
 

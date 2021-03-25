@@ -28,6 +28,8 @@ import (
 func TestRun(t *testing.T) {
 	MarkIntegrationTest(t, CanRunWithoutGcp)
 
+	// Note: `custom-buildx` is not included as it depends on having a
+	// `skaffold-builder` builder configured and a registry to push to.
 	tests := []struct {
 		description string
 		dir         string
@@ -50,6 +52,11 @@ func TestRun(t *testing.T) {
 			description: "structure-tests",
 			dir:         "examples/structure-tests",
 			pods:        []string{"getting-started"},
+		},
+		{
+			description: "custom-tests",
+			dir:         "examples/custom-tests",
+			pods:        []string{"custom-test"},
 		},
 		{
 			description: "microservices",
@@ -135,7 +142,8 @@ func TestRun(t *testing.T) {
 		t.Run(test.description, func(t *testing.T) {
 			ns, client := SetupNamespace(t)
 
-			skaffold.Run(test.args...).InDir(test.dir).InNs(ns.Name).WithEnv(test.env).RunOrFail(t)
+			args := append(test.args, "--cache-artifacts=false")
+			skaffold.Run(args...).InDir(test.dir).InNs(ns.Name).WithEnv(test.env).RunOrFail(t)
 
 			client.WaitForPodsReady(test.pods...)
 			client.WaitForDeploymentsToStabilize(test.deployments...)

@@ -29,6 +29,7 @@ import (
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/docker"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/runner/runcontext"
 	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/schema/latest"
+	"github.com/GoogleContainerTools/skaffold/pkg/skaffold/util"
 	"github.com/GoogleContainerTools/skaffold/testutil"
 )
 
@@ -264,6 +265,7 @@ func TestValidateNetworkMode(t *testing.T) {
 		description string
 		artifacts   []*latest.Artifact
 		shouldErr   bool
+		env         []string
 	}{
 		{
 			description: "not a docker artifact",
@@ -315,6 +317,21 @@ func TestValidateNetworkMode(t *testing.T) {
 			shouldErr: true,
 		},
 		{
+			description: "empty container's network stack in env var",
+			artifacts: []*latest.Artifact{
+				{
+					ImageName: "image/container",
+					ArtifactType: latest.ArtifactType{
+						DockerArtifact: &latest.DockerArtifact{
+							NetworkMode: "Container:{{.CONTAINER}}",
+						},
+					},
+				},
+			},
+			env:       []string{"CONTAINER="},
+			shouldErr: true,
+		},
+		{
 			description: "wrong container's network stack '-not-valid'",
 			artifacts: []*latest.Artifact{
 				{
@@ -326,6 +343,21 @@ func TestValidateNetworkMode(t *testing.T) {
 					},
 				},
 			},
+			shouldErr: true,
+		},
+		{
+			description: "wrong container's network stack '-not-valid' in env var",
+			artifacts: []*latest.Artifact{
+				{
+					ImageName: "image/container",
+					ArtifactType: latest.ArtifactType{
+						DockerArtifact: &latest.DockerArtifact{
+							NetworkMode: "Container:{{.CONTAINER}}",
+						},
+					},
+				},
+			},
+			env:       []string{"CONTAINER=-not-valid"},
 			shouldErr: true,
 		},
 		{
@@ -343,6 +375,21 @@ func TestValidateNetworkMode(t *testing.T) {
 			shouldErr: true,
 		},
 		{
+			description: "wrong container's network stack 'fussball' in env var",
+			artifacts: []*latest.Artifact{
+				{
+					ImageName: "image/container",
+					ArtifactType: latest.ArtifactType{
+						DockerArtifact: &latest.DockerArtifact{
+							NetworkMode: "Container:{{.CONTAINER}}",
+						},
+					},
+				},
+			},
+			env:       []string{"CONTAINER=fußball"},
+			shouldErr: true,
+		},
+		{
 			description: "container's network stack 'unique'",
 			artifacts: []*latest.Artifact{
 				{
@@ -356,6 +403,20 @@ func TestValidateNetworkMode(t *testing.T) {
 			},
 		},
 		{
+			description: "container's network stack 'unique' in env var",
+			artifacts: []*latest.Artifact{
+				{
+					ImageName: "image/container",
+					ArtifactType: latest.ArtifactType{
+						DockerArtifact: &latest.DockerArtifact{
+							NetworkMode: "Container:{{.CONTAINER}}",
+						},
+					},
+				},
+			},
+			env: []string{"CONTAINER=unique"},
+		},
+		{
 			description: "container's network stack 'unique-id.123'",
 			artifacts: []*latest.Artifact{
 				{
@@ -367,6 +428,20 @@ func TestValidateNetworkMode(t *testing.T) {
 					},
 				},
 			},
+		},
+		{
+			description: "container's network stack 'unique-id.123' in env var",
+			artifacts: []*latest.Artifact{
+				{
+					ImageName: "image/container",
+					ArtifactType: latest.ArtifactType{
+						DockerArtifact: &latest.DockerArtifact{
+							NetworkMode: "Container:{{.CONTAINER}}",
+						},
+					},
+				},
+			},
+			env: []string{"CONTAINER=unique-id.123"},
 		},
 		{
 			description: "none",
@@ -426,6 +501,7 @@ func TestValidateNetworkMode(t *testing.T) {
 		testutil.Run(t, test.description, func(t *testutil.T) {
 			// disable yamltags validation
 			t.Override(&validateYamltags, func(interface{}) error { return nil })
+			t.Override(&util.OSEnviron, func() []string { return test.env })
 
 			err := Process(
 				[]*latest.SkaffoldConfig{{
@@ -456,6 +532,7 @@ func TestValidateNetworkModeDockerContainerExists(t *testing.T) {
 		artifacts      []*latest.Artifact
 		clientResponse []types.Container
 		shouldErr      bool
+		env            []string
 	}{
 		{
 			description: "no running containers",
@@ -511,6 +588,24 @@ func TestValidateNetworkModeDockerContainerExists(t *testing.T) {
 			},
 		},
 		{
+			description: "existing running container referenced by first id chars",
+			artifacts: []*latest.Artifact{
+				{
+					ImageName: "image/container",
+					ArtifactType: latest.ArtifactType{
+						DockerArtifact: &latest.DockerArtifact{
+							NetworkMode: "Container:123",
+						},
+					},
+				},
+			},
+			clientResponse: []types.Container{
+				{
+					ID: "1234567890",
+				},
+			},
+		},
+		{
 			description: "existing running container referenced by name",
 			artifacts: []*latest.Artifact{
 				{
@@ -529,11 +624,71 @@ func TestValidateNetworkModeDockerContainerExists(t *testing.T) {
 				},
 			},
 		},
+		{
+			description: "non existing running container referenced by id in envvar",
+			artifacts: []*latest.Artifact{
+				{
+					ImageName: "image/container",
+					ArtifactType: latest.ArtifactType{
+						DockerArtifact: &latest.DockerArtifact{
+							NetworkMode: "Container:{{ .CONTAINER }}",
+						},
+					},
+				},
+			},
+			clientResponse: []types.Container{
+				{
+					ID: "non-foo",
+				},
+			},
+			env:       []string{"CONTAINER=foo"},
+			shouldErr: true,
+		},
+		{
+			description: "existing running container referenced by id in envvar",
+			artifacts: []*latest.Artifact{
+				{
+					ImageName: "image/container",
+					ArtifactType: latest.ArtifactType{
+						DockerArtifact: &latest.DockerArtifact{
+							NetworkMode: "Container:{{ .CONTAINER }}",
+						},
+					},
+				},
+			},
+			clientResponse: []types.Container{
+				{
+					ID: "foo",
+				},
+			},
+			env: []string{"CONTAINER=foo"},
+		},
+		{
+			description: "existing running container referenced by name in envvar",
+			artifacts: []*latest.Artifact{
+				{
+					ImageName: "image/container",
+					ArtifactType: latest.ArtifactType{
+						DockerArtifact: &latest.DockerArtifact{
+							NetworkMode: "Container:{{ .CONTAINER }}",
+						},
+					},
+				},
+			},
+			clientResponse: []types.Container{
+				{
+					ID:    "non-foo",
+					Names: []string{"/foo"},
+				},
+			},
+			env: []string{"CONTAINER=foo"},
+		},
 	}
 	for _, test := range tests {
 		testutil.Run(t, test.description, func(t *testutil.T) {
 			// disable yamltags validation
 			t.Override(&validateYamltags, func(interface{}) error { return nil })
+			t.Override(&util.OSEnviron, func() []string { return test.env })
 			t.Override(&docker.NewAPIClient, func(docker.Config) (docker.LocalDaemon, error) {
 				fakeClient := &fakeCommonAPIClient{
 					CommonAPIClient: &testutil.FakeAPIClient{
@@ -766,6 +921,15 @@ func TestValidateImageNames(t *testing.T) {
 				ImageName: "img",
 			}},
 			shouldErr: false,
+		},
+		{
+			description: "duplicates",
+			artifacts: []*latest.Artifact{{
+				ImageName: "img",
+			}, {
+				ImageName: "img",
+			}},
+			shouldErr: true,
 		},
 		{
 			description: "shouldn't have a tag",
@@ -1264,6 +1428,66 @@ func TestValidateTaggingPolicy(t *testing.T) {
 				}})
 
 			t.CheckError(test.shouldErr, err)
+		})
+	}
+}
+
+func TestValidateCustomTest(t *testing.T) {
+	tests := []struct {
+		description    string
+		command        string
+		dependencies   *latest.CustomTestDependencies
+		expectedErrors int
+	}{
+		{
+			description: "no errors",
+			command:     "echo Hello!",
+			dependencies: &latest.CustomTestDependencies{
+				Paths:  []string{"somepath"},
+				Ignore: []string{"anotherpath"},
+			},
+		}, {
+			description: "empty command",
+			command:     "",
+			dependencies: &latest.CustomTestDependencies{
+				Paths:  []string{"somepath"},
+				Ignore: []string{"anotherpath"},
+			},
+			expectedErrors: 1,
+		}, {
+			description: "use both path and command",
+			command:     "echo Hello!",
+			dependencies: &latest.CustomTestDependencies{
+				Command: "bazel query deps",
+				Paths:   []string{"somepath"},
+			},
+			expectedErrors: 1,
+		}, {
+			description: "ignore in conjunction with command",
+			command:     "echo Hello!",
+			dependencies: &latest.CustomTestDependencies{
+				Command: "bazel query deps",
+				Ignore:  []string{"ignoreme"},
+			},
+			expectedErrors: 1,
+		}, {
+			command:      "echo Hello!",
+			description:  "nil dependencies",
+			dependencies: nil,
+		},
+	}
+	for _, test := range tests {
+		testutil.Run(t, test.description, func(t *testutil.T) {
+			testCase := &latest.TestCase{
+				ImageName: "image",
+				CustomTests: []latest.CustomTest{{
+					Command:      test.command,
+					Dependencies: test.dependencies,
+				}},
+			}
+
+			errs := validateCustomTest([]*latest.TestCase{testCase})
+			t.CheckDeepEqual(test.expectedErrors, len(errs))
 		})
 	}
 }
